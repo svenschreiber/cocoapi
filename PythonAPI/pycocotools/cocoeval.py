@@ -151,9 +151,10 @@ class COCOeval:
 
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
-        self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet)
+        self.evalImgs = [evaluateImg(imgId, catId, prop, propRng, maxDet)
                  for catId in catIds
-                 for areaRng in p.areaRng
+                 for prop in p.propRng.keys()
+                 for propRng in p.propRng[prop]
                  for imgId in p.imgIds
              ]
         self._paramsEval = copy.deepcopy(self.params)
@@ -232,7 +233,7 @@ class COCOeval:
                 ious[i, j] = np.sum(np.exp(-e)) / e.shape[0]
         return ious
 
-    def evaluateImg(self, imgId, catId, aRng, maxDet):
+    def evaluateImg(self, imgId, catId, prop, propRng, maxDet):
         '''
         perform evaluation for single category and image
         :return: dict (single image results)
@@ -248,7 +249,7 @@ class COCOeval:
             return None
 
         for g in gt:
-            if g['ignore'] or (g['area']<aRng[0] or g['area']>aRng[1]):
+            if g['ignore'] or (g[prop]<propRng[0] or g[prop]>propRng[1]):
                 g['_ignore'] = 1
             else:
                 g['_ignore'] = 0
@@ -295,13 +296,14 @@ class COCOeval:
                     dtm[tind,dind]  = gt[m]['id']
                     gtm[tind,m]     = d['id']
         # set unmatched detections outside of area range to ignore
-        a = np.array([d['area']<aRng[0] or d['area']>aRng[1] for d in dt]).reshape((1, len(dt)))
+        a = np.array([d[prop]<propRng[0] or d[prop]>propRng[1] for d in dt]).reshape((1, len(dt)))
         dtIg = np.logical_or(dtIg, np.logical_and(dtm==0, np.repeat(a,T,0)))
         # store results for given image and category
         return {
                 'image_id':     imgId,
                 'category_id':  catId,
-                'aRng':         aRng,
+                'prop':         prop,
+                'propRng':      propRng,
                 'maxDet':       maxDet,
                 'dtIds':        [d['id'] for d in dt],
                 'gtIds':        [g['id'] for g in gt],
@@ -329,88 +331,90 @@ class COCOeval:
         T           = len(p.iouThrs)
         R           = len(p.recThrs)
         K           = len(p.catIds) if p.useCats else 1
-        A           = len(p.areaRng)
+        P           = len(p.propRng.keys())
+        PR          = len(p.propRngLbl)
         M           = len(p.maxDets)
-        precision   = -np.ones((T,R,K,A,M)) # -1 for the precision of absent categories
-        recall      = -np.ones((T,K,A,M))
-        scores      = -np.ones((T,R,K,A,M))
+        precision   = -np.ones((T,R,K,P,PR,M)) # -1 for the precision of absent categories
+        recall      = -np.ones((T,K,P,PR,M))
+        scores      = -np.ones((T,R,K,P,PR,M))
 
         # create dictionary for future indexing
         _pe = self._paramsEval
         catIds = _pe.catIds if _pe.useCats else [-1]
         setK = set(catIds)
-        setA = set(map(tuple, _pe.areaRng))
         setM = set(_pe.maxDets)
         setI = set(_pe.imgIds)
         # get inds to evaluate
         k_list = [n for n, k in enumerate(p.catIds)  if k in setK]
         m_list = [m for n, m in enumerate(p.maxDets) if m in setM]
-        a_list = [n for n, a in enumerate(map(lambda x: tuple(x), p.areaRng)) if a in setA]
         i_list = [n for n, i in enumerate(p.imgIds)  if i in setI]
         I0 = len(_pe.imgIds)
-        A0 = len(_pe.areaRng)
-        # retrieve E at each category, area range, and max number of detections
+        P0 = len(_pe.propRng.keys())
+        P_RNG0 = len(_pe.propRngLbl)
+        # retrieve E at each category, property, property range, and max number of detections
         for k, k0 in enumerate(k_list):
-            Nk = k0*A0*I0
-            for a, a0 in enumerate(a_list):
-                Na = a0*I0
-                for m, maxDet in enumerate(m_list):
-                    E = [self.evalImgs[Nk + Na + i] for i in i_list]
-                    E = [e for e in E if not e is None]
-                    if len(E) == 0:
-                        continue
-                    dtScores = np.concatenate([e['dtScores'][0:maxDet] for e in E])
+            Nk = k0*P0*P_RNG0*I0
+            for prop, prop0 in enumerate(_pe.propRng.keys()):
+                Np = prop*P_RNG0*I0 # TODO: we can do this because we always want all properties to be evaluated
+                for pRng, pRng0 in enumerate(_pe.propRng[prop0]):
+                    NpRng = pRng*I0
+                    for m, maxDet in enumerate(m_list):
+                        E = [self.evalImgs[Nk + Np + NpRng + i] for i in i_list]
+                        E = [e for e in E if not e is None]
+                        if len(E) == 0:
+                            continue
+                        dtScores = np.concatenate([e['dtScores'][0:maxDet] for e in E])
 
-                    # different sorting method generates slightly different results.
-                    # mergesort is used to be consistent as Matlab implementation.
-                    inds = np.argsort(-dtScores, kind='mergesort')
-                    dtScoresSorted = dtScores[inds]
+                        # different sorting method generates slightly different results.
+                        # mergesort is used to be consistent as Matlab implementation.
+                        inds = np.argsort(-dtScores, kind='mergesort')
+                        dtScoresSorted = dtScores[inds]
 
-                    dtm  = np.concatenate([e['dtMatches'][:,0:maxDet] for e in E], axis=1)[:,inds]
-                    dtIg = np.concatenate([e['dtIgnore'][:,0:maxDet]  for e in E], axis=1)[:,inds]
-                    gtIg = np.concatenate([e['gtIgnore'] for e in E])
-                    npig = np.count_nonzero(gtIg==0 )
-                    if npig == 0:
-                        continue
-                    tps = np.logical_and(               dtm,  np.logical_not(dtIg) )
-                    fps = np.logical_and(np.logical_not(dtm), np.logical_not(dtIg) )
+                        dtm  = np.concatenate([e['dtMatches'][:,0:maxDet] for e in E], axis=1)[:,inds]
+                        dtIg = np.concatenate([e['dtIgnore'][:,0:maxDet]  for e in E], axis=1)[:,inds]
+                        gtIg = np.concatenate([e['gtIgnore'] for e in E])
+                        npig = np.count_nonzero(gtIg==0 )
+                        if npig == 0:
+                            continue
+                        tps = np.logical_and(               dtm,  np.logical_not(dtIg) )
+                        fps = np.logical_and(np.logical_not(dtm), np.logical_not(dtIg) )
 
-                    tp_sum = np.cumsum(tps, axis=1).astype(dtype=float)
-                    fp_sum = np.cumsum(fps, axis=1).astype(dtype=float)
-                    for t, (tp, fp) in enumerate(zip(tp_sum, fp_sum)):
-                        tp = np.array(tp)
-                        fp = np.array(fp)
-                        nd = len(tp)
-                        rc = tp / npig
-                        pr = tp / (fp+tp+np.spacing(1))
-                        q  = np.zeros((R,))
-                        ss = np.zeros((R,))
+                        tp_sum = np.cumsum(tps, axis=1).astype(dtype=float)
+                        fp_sum = np.cumsum(fps, axis=1).astype(dtype=float)
+                        for t, (tp, fp) in enumerate(zip(tp_sum, fp_sum)):
+                            tp = np.array(tp)
+                            fp = np.array(fp)
+                            nd = len(tp)
+                            rc = tp / npig
+                            pr = tp / (fp+tp+np.spacing(1))
+                            q  = np.zeros((R,))
+                            ss = np.zeros((R,))
 
-                        if nd:
-                            recall[t,k,a,m] = rc[-1]
-                        else:
-                            recall[t,k,a,m] = 0
+                            if nd:
+                                recall[t,k,prop,pRng,m] = rc[-1]
+                            else:
+                                recall[t,k,prop,pRng,m] = 0
 
-                        # numpy is slow without cython optimization for accessing elements
-                        # use python array gets significant speed improvement
-                        pr = pr.tolist(); q = q.tolist()
+                            # numpy is slow without cython optimization for accessing elements
+                            # use python array gets significant speed improvement
+                            pr = pr.tolist(); q = q.tolist()
 
-                        for i in range(nd-1, 0, -1):
-                            if pr[i] > pr[i-1]:
-                                pr[i-1] = pr[i]
+                            for i in range(nd-1, 0, -1):
+                                if pr[i] > pr[i-1]:
+                                    pr[i-1] = pr[i]
 
-                        inds = np.searchsorted(rc, p.recThrs, side='left')
-                        try:
-                            for ri, pi in enumerate(inds):
-                                q[ri] = pr[pi]
-                                ss[ri] = dtScoresSorted[pi]
-                        except:
-                            pass
-                        precision[t,:,k,a,m] = np.array(q)
-                        scores[t,:,k,a,m] = np.array(ss)
+                            inds = np.searchsorted(rc, p.recThrs, side='left')
+                            try:
+                                for ri, pi in enumerate(inds):
+                                    q[ri] = pr[pi]
+                                    ss[ri] = dtScoresSorted[pi]
+                            except:
+                                pass
+                            precision[t,:,k,prop,pRng,m] = np.array(q)
+                            scores[t,:,k,prop,pRng,m] = np.array(ss)
         self.eval = {
             'params': p,
-            'counts': [T, R, K, A, M],
+            'counts': [T, R, K, P, PR, M],
             'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'precision': precision,
             'recall':   recall,
@@ -424,15 +428,16 @@ class COCOeval:
         Compute and display summary metrics for evaluation results.
         Note this functin can *only* be applied on the default parameter setting
         '''
-        def _summarize( ap=1, iouThr=None, areaRng='all', maxDets=100 ):
+        def _summarize( ap=1, iouThr=None, prop='area', propRng='all', maxDets=100 ):
             p = self.params
-            iStr = ' {:<18} {} @[ IoU={:<9} | area={:>6s} | maxDets={:>3d} ] = {:0.3f}'
+            iStr = ' {:<18} {} @[ IoU={:<9} | {:<18}={:>6s} | maxDets={:>3d} ] = {:0.3f}'
             titleStr = 'Average Precision' if ap == 1 else 'Average Recall'
             typeStr = '(AP)' if ap==1 else '(AR)'
             iouStr = '{:0.2f}:{:0.2f}'.format(p.iouThrs[0], p.iouThrs[-1]) \
                 if iouThr is None else '{:0.2f}'.format(iouThr)
 
-            aind = [i for i, aRng in enumerate(p.areaRngLbl) if aRng == areaRng]
+            pind = [i for i, key in enumerate(p.propRng.keys()) if key == prop]
+            prind = [i for i, pRng in enumerate(p.propRngLbl) if pRng == propRng]
             mind = [i for i, mDet in enumerate(p.maxDets) if mDet == maxDets]
             if ap == 1:
                 # dimension of precision: [TxRxKxAxM]
@@ -441,34 +446,34 @@ class COCOeval:
                 if iouThr is not None:
                     t = np.where(iouThr == p.iouThrs)[0]
                     s = s[t]
-                s = s[:,:,:,aind,mind]
+                s = s[:,:,:,pind,prind,mind]
             else:
                 # dimension of recall: [TxKxAxM]
                 s = self.eval['recall']
                 if iouThr is not None:
                     t = np.where(iouThr == p.iouThrs)[0]
                     s = s[t]
-                s = s[:,:,aind,mind]
+                s = s[:,:,pind,prind,mind]
             if len(s[s>-1])==0:
                 mean_s = -1
             else:
                 mean_s = np.mean(s[s>-1])
-            print(iStr.format(titleStr, typeStr, iouStr, areaRng, maxDets, mean_s))
+            print(iStr.format(titleStr, typeStr, iouStr, prop, propRng, maxDets, mean_s))
             return mean_s
         def _summarizeDets():
             stats = np.zeros((12,))
             stats[0] = _summarize(1)
             stats[1] = _summarize(1, iouThr=.5, maxDets=self.params.maxDets[2])
             stats[2] = _summarize(1, iouThr=.75, maxDets=self.params.maxDets[2])
-            stats[3] = _summarize(1, areaRng='small', maxDets=self.params.maxDets[2])
-            stats[4] = _summarize(1, areaRng='medium', maxDets=self.params.maxDets[2])
-            stats[5] = _summarize(1, areaRng='large', maxDets=self.params.maxDets[2])
+            stats[3] = _summarize(1, propRng='small', maxDets=self.params.maxDets[2])
+            stats[4] = _summarize(1, propRng='medium', maxDets=self.params.maxDets[2])
+            stats[5] = _summarize(1, propRng='large', maxDets=self.params.maxDets[2])
             stats[6] = _summarize(0, maxDets=self.params.maxDets[0])
             stats[7] = _summarize(0, maxDets=self.params.maxDets[1])
             stats[8] = _summarize(0, maxDets=self.params.maxDets[2])
-            stats[9] = _summarize(0, areaRng='small', maxDets=self.params.maxDets[2])
-            stats[10] = _summarize(0, areaRng='medium', maxDets=self.params.maxDets[2])
-            stats[11] = _summarize(0, areaRng='large', maxDets=self.params.maxDets[2])
+            stats[9] = _summarize(0, propRng='small', maxDets=self.params.maxDets[2])
+            stats[10] = _summarize(0, propRng='medium', maxDets=self.params.maxDets[2])
+            stats[11] = _summarize(0, propRng='large', maxDets=self.params.maxDets[2])
             return stats
         def _summarizeKps():
             stats = np.zeros((10,))
@@ -506,8 +511,19 @@ class Params:
         self.iouThrs = np.linspace(.5, 0.95, int(np.round((0.95 - .5) / .05)) + 1, endpoint=True)
         self.recThrs = np.linspace(.0, 1.00, int(np.round((1.00 - .0) / .01)) + 1, endpoint=True)
         self.maxDets = [1, 10, 100]
-        self.areaRng = [[0 ** 2, 1e5 ** 2], [0 ** 2, 32 ** 2], [32 ** 2, 96 ** 2], [96 ** 2, 1e5 ** 2]]
-        self.areaRngLbl = ['all', 'small', 'medium', 'large']
+        self.propRng = {
+            "area":                     [[0 ** 2, 1e5 ** 2], [0 ** 2, 32 ** 2], [32 ** 2, 96 ** 2], [96 ** 2, 1e5 ** 2]],
+            "good_continuation":        [[0.0, 1.0], [0.0, 0.892], [0.892, 0.920], [0.920, 1.0]],
+            "symmetry_1":               [[0.0, 1.0], [0.0, 0.763], [0.763, 0.865], [0.865, 1.0]],
+            "symmetry_2":               [[0.0, 1.0], [0.0, 0.800], [0.800, 0.886], [0.886, 1.0]],
+            "convexity_dist":           [[0.0, 1.0], [0.0, 0.739], [0.739, 0.805], [0.805, 1.0]],
+            "convexity_hull":           [[0.0, 1.0], [0.0, 0.886], [0.886, 0.945], [0.945, 1.0]],
+            "convexity_solidity":       [[0.0, 1.0], [0.0, 0.769], [0.769, 0.900], [0.900, 1.0]],
+            "compactness_centr_dist":   [[0.0, 1.0], [0.0, 0.571], [0.571, 0.661], [0.661, 1.0]],
+            "compactness_circularity":  [[0.0, 1.0], [0.0, 0.392], [0.392, 0.598], [0.598, 1.0]],
+            "compactness_eccentricity": [[0.0, 1.0], [0.0, 0.813], [0.813, 0.932], [0.932, 1.0]],
+        }
+        self.propRngLbl = ['all', 'small', 'medium', 'large']
         self.useCats = 1
 
     def setKpParams(self):
