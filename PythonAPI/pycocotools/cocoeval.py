@@ -111,9 +111,9 @@ class COCOeval:
                 gt['ignore'] = (gt['num_keypoints'] == 0) or gt['ignore']
         self._gts = defaultdict(list)       # gt for evaluation
         self._dts = defaultdict(list)       # dt for evaluation
-        for gt in gts:
+        for gt in gts[:]:
             self._gts[gt['image_id'], gt['category_id']].append(gt)
-        for dt in dts:
+        for dt in dts[:]:
             self._dts[dt['image_id'], dt['category_id']].append(dt)
         self.evalImgs = defaultdict(list)   # per-image per-category evaluation results
         self.eval     = {}                  # accumulated evaluation results
@@ -430,7 +430,7 @@ class COCOeval:
         '''
         def _summarize( ap=1, iouThr=None, prop='area', propRng='all', maxDets=100 ):
             p = self.params
-            iStr = ' {:<18} {} @[ IoU={:<9} | {:<18}={:>6s} | maxDets={:>3d} ] = {:0.3f}'
+            iStr = ' {:<18} {} @[ IoU={:<9} | {:<24}={:>6s} | maxDets={:>3d} ] = {:0.3f}'
             titleStr = 'Average Precision' if ap == 1 else 'Average Recall'
             typeStr = '(AP)' if ap==1 else '(AR)'
             iouStr = '{:0.2f}:{:0.2f}'.format(p.iouThrs[0], p.iouThrs[-1]) \
@@ -461,19 +461,26 @@ class COCOeval:
             print(iStr.format(titleStr, typeStr, iouStr, prop, propRng, maxDets, mean_s))
             return mean_s
         def _summarizeDets():
-            stats = np.zeros((12,))
-            stats[0] = _summarize(1)
-            stats[1] = _summarize(1, iouThr=.5, maxDets=self.params.maxDets[2])
-            stats[2] = _summarize(1, iouThr=.75, maxDets=self.params.maxDets[2])
-            stats[3] = _summarize(1, propRng='small', maxDets=self.params.maxDets[2])
-            stats[4] = _summarize(1, propRng='medium', maxDets=self.params.maxDets[2])
-            stats[5] = _summarize(1, propRng='large', maxDets=self.params.maxDets[2])
-            stats[6] = _summarize(0, maxDets=self.params.maxDets[0])
-            stats[7] = _summarize(0, maxDets=self.params.maxDets[1])
-            stats[8] = _summarize(0, maxDets=self.params.maxDets[2])
-            stats[9] = _summarize(0, propRng='small', maxDets=self.params.maxDets[2])
-            stats[10] = _summarize(0, propRng='medium', maxDets=self.params.maxDets[2])
-            stats[11] = _summarize(0, propRng='large', maxDets=self.params.maxDets[2])
+            # stats = np.zeros((12,))
+            # stats[0] = _summarize(1)
+            # stats[1] = _summarize(1, iouThr=.5, maxDets=self.params.maxDets[2])
+            # stats[2] = _summarize(1, iouThr=.75, maxDets=self.params.maxDets[2])
+            # stats[3] = _summarize(1, propRng='small', maxDets=self.params.maxDets[2])
+            # stats[4] = _summarize(1, propRng='medium', maxDets=self.params.maxDets[2])
+            # stats[5] = _summarize(1, propRng='large', maxDets=self.params.maxDets[2])
+            # stats[6] = _summarize(0, maxDets=self.params.maxDets[0])
+            # stats[7] = _summarize(0, maxDets=self.params.maxDets[1])
+            # stats[8] = _summarize(0, maxDets=self.params.maxDets[2])
+            # stats[9] = _summarize(0, propRng='small', maxDets=self.params.maxDets[2])
+            # stats[10] = _summarize(0, propRng='medium', maxDets=self.params.maxDets[2])
+            # stats[11] = _summarize(0, propRng='large', maxDets=self.params.maxDets[2])
+            n_keys = len(self.params.propRng.keys())
+            n_rng  = len(self.params.propRngLbl)
+            stats = np.zeros((n_keys * n_rng,))
+            for i, prop in enumerate(self.params.propRng.keys()):
+                for j, propRng in enumerate(self.params.propRngLbl):
+                    stats[i * n_rng + j] = _summarize(1, prop=prop, propRng=propRng, maxDets=self.params.maxDets[2])
+                print()
             return stats
         def _summarizeKps():
             stats = np.zeros((10,))
