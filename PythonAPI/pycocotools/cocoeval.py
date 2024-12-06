@@ -148,13 +148,20 @@ class COCOeval:
         self.ious = {(imgId, catId): computeIoU(imgId, catId) \
                         for imgId in p.imgIds
                         for catId in catIds}
+        
+        def _safe_get(l, idx, default):
+            try:
+                return l[idx]
+            except IndexError:
+                return default
 
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
-        self.evalImgs = [evaluateImg(imgId, catId, prop, propRng, maxDet)
+        maxRng = np.max([len(prop["rng"]) for prop in p.props.values()])
+        self.evalImgs = [evaluateImg(imgId, catId, prop, _safe_get(p.props[prop]["rng"], rng_i, []), maxDet)
                  for catId in catIds
                  for prop in p.props.keys()
-                 for propRng in p.props[prop]["rng"]
+                 for rng_i in range(maxRng)
                  for imgId in p.imgIds
              ]
         self._paramsEval = copy.deepcopy(self.params)
@@ -238,6 +245,7 @@ class COCOeval:
         perform evaluation for single category and image
         :return: dict (single image results)
         '''
+        if len(propRng) == 0: return {}
         p = self.params
         if p.useCats:
             gt = self._gts[imgId,catId]
