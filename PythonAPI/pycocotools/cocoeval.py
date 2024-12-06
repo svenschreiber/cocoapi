@@ -153,8 +153,8 @@ class COCOeval:
         maxDet = p.maxDets[-1]
         self.evalImgs = [evaluateImg(imgId, catId, prop, propRng, maxDet)
                  for catId in catIds
-                 for prop in p.propRng.keys()
-                 for propRng in p.propRng[prop]
+                 for prop in p.props.keys()
+                 for propRng in p.props[prop]["rng"]
                  for imgId in p.imgIds
              ]
         self._paramsEval = copy.deepcopy(self.params)
@@ -331,8 +331,8 @@ class COCOeval:
         T           = len(p.iouThrs)
         R           = len(p.recThrs)
         K           = len(p.catIds) if p.useCats else 1
-        P           = len(p.propRng.keys())
-        PR          = len(p.propRngLbl)
+        P           = len(p.props.keys())
+        PR          = np.max([len(prop["rng"]) for prop in p.props.values()])
         M           = len(p.maxDets)
         precision   = -np.ones((T,R,K,P,PR,M)) # -1 for the precision of absent categories
         recall      = -np.ones((T,K,P,PR,M))
@@ -349,14 +349,14 @@ class COCOeval:
         m_list = [m for n, m in enumerate(p.maxDets) if m in setM]
         i_list = [n for n, i in enumerate(p.imgIds)  if i in setI]
         I0 = len(_pe.imgIds)
-        P0 = len(_pe.propRng.keys())
-        P_RNG0 = len(_pe.propRngLbl)
+        P0 = len(_pe.props.keys())
+        P_RNG0 = np.max([len(prop["rng"]) for prop in _pe.props.values()])
         # retrieve E at each category, property, property range, and max number of detections
         for k, k0 in enumerate(k_list):
             Nk = k0*P0*P_RNG0*I0
-            for prop, prop0 in enumerate(_pe.propRng.keys()):
+            for prop, prop0 in enumerate(_pe.props.keys()):
                 Np = prop*P_RNG0*I0 # TODO: we can do this because we always want all properties to be evaluated
-                for pRng, pRng0 in enumerate(_pe.propRng[prop0]):
+                for pRng, pRng0 in enumerate(_pe.props[prop0]["rng"]):
                     NpRng = pRng*I0
                     for m, maxDet in enumerate(m_list):
                         E = [self.evalImgs[Nk + Np + NpRng + i] for i in i_list]
@@ -436,8 +436,8 @@ class COCOeval:
             iouStr = '{:0.2f}:{:0.2f}'.format(p.iouThrs[0], p.iouThrs[-1]) \
                 if iouThr is None else '{:0.2f}'.format(iouThr)
 
-            pind = [i for i, key in enumerate(p.propRng.keys()) if key == prop]
-            prind = [i for i, pRng in enumerate(p.propRngLbl) if pRng == propRng]
+            pind = [i for i, key in enumerate(p.props.keys()) if key == prop]
+            prind = [i for i, pRng in enumerate(p.props[prop]["lbl"]) if pRng == propRng]
             mind = [i for i, mDet in enumerate(p.maxDets) if mDet == maxDets]
             if ap == 1:
                 # dimension of precision: [TxRxKxAxM]
@@ -474,11 +474,11 @@ class COCOeval:
             # stats[9] = _summarize(0, propRng='small', maxDets=self.params.maxDets[2])
             # stats[10] = _summarize(0, propRng='medium', maxDets=self.params.maxDets[2])
             # stats[11] = _summarize(0, propRng='large', maxDets=self.params.maxDets[2])
-            n_keys = len(self.params.propRng.keys())
-            n_rng  = len(self.params.propRngLbl)
+            n_keys = len(self.params.props.keys())
+            n_rng = np.max([len(prop["rng"]) for prop in self.params.props.values()])
             stats = np.zeros((n_keys * n_rng,))
-            for i, prop in enumerate(self.params.propRng.keys()):
-                for j, propRng in enumerate(self.params.propRngLbl):
+            for i, prop in enumerate(self.params.props.keys()):
+                for j, propRng in enumerate(self.params.props[prop]["lbl"]):
                     stats[i * n_rng + j] = _summarize(1, prop=prop, propRng=propRng, maxDets=self.params.maxDets[2])
                 print()
             return stats
@@ -518,19 +518,18 @@ class Params:
         self.iouThrs = np.linspace(.5, 0.95, int(np.round((0.95 - .5) / .05)) + 1, endpoint=True)
         self.recThrs = np.linspace(.0, 1.00, int(np.round((1.00 - .0) / .01)) + 1, endpoint=True)
         self.maxDets = [1, 10, 100]
-        self.propRng = {
-            "area":                     [[0 ** 2, 1e5 ** 2], [0 ** 2, 32 ** 2], [32 ** 2, 96 ** 2], [96 ** 2, 1e5 ** 2]],
-            "good_continuation":        [[0.0, 1.0], [0.0, 0.892], [0.892, 0.920], [0.920, 1.0]],
-            "symmetry_1":               [[0.0, 1.0], [0.0, 0.763], [0.763, 0.865], [0.865, 1.0]],
-            "symmetry_2":               [[0.0, 1.0], [0.0, 0.800], [0.800, 0.886], [0.886, 1.0]],
-            "convexity_dist":           [[0.0, 1.0], [0.0, 0.739], [0.739, 0.805], [0.805, 1.0]],
-            "convexity_hull":           [[0.0, 1.0], [0.0, 0.886], [0.886, 0.945], [0.945, 1.0]],
-            "convexity_solidity":       [[0.0, 1.0], [0.0, 0.769], [0.769, 0.900], [0.900, 1.0]],
-            "compactness_centr_dist":   [[0.0, 1.0], [0.0, 0.571], [0.571, 0.661], [0.661, 1.0]],
-            "compactness_circularity":  [[0.0, 1.0], [0.0, 0.392], [0.392, 0.598], [0.598, 1.0]],
-            "compactness_eccentricity": [[0.0, 1.0], [0.0, 0.813], [0.813, 0.932], [0.932, 1.0]],
+        self.props = {
+            "area":                     {"rng": [[0 ** 2, 1e5 ** 2], [0 ** 2, 32 ** 2], [32 ** 2, 96 ** 2], [96 ** 2, 1e5 ** 2]], "lbl": ['all', 'small', 'medium', 'large']},
+            "good_continuation":        {"rng": [[0.0, 1.0], [0.0, 0.892], [0.892, 0.920], [0.920, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
+            "symmetry_1":               {"rng": [[0.0, 1.0], [0.0, 0.763], [0.763, 0.865], [0.865, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
+            "symmetry_2":               {"rng": [[0.0, 1.0], [0.0, 0.800], [0.800, 0.886], [0.886, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
+            "convexity_dist":           {"rng": [[0.0, 1.0], [0.0, 0.739], [0.739, 0.805], [0.805, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
+            "convexity_hull":           {"rng": [[0.0, 1.0], [0.0, 0.886], [0.886, 0.945], [0.945, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
+            "convexity_solidity":       {"rng": [[0.0, 1.0], [0.0, 0.769], [0.769, 0.900], [0.900, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
+            "compactness_centr_dist":   {"rng": [[0.0, 1.0], [0.0, 0.571], [0.571, 0.661], [0.661, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
+            "compactness_circularity":  {"rng": [[0.0, 1.0], [0.0, 0.392], [0.392, 0.598], [0.598, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
+            "compactness_eccentricity": {"rng": [[0.0, 1.0], [0.0, 0.813], [0.813, 0.932], [0.932, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
         }
-        self.propRngLbl = ['all', 'small', 'medium', 'large']
         self.useCats = 1
 
     def setKpParams(self):
