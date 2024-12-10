@@ -57,7 +57,7 @@ class COCOeval:
     # Data, paper, and tutorials available at:  http://mscoco.org/
     # Code written by Piotr Dollar and Tsung-Yi Lin, 2015.
     # Licensed under the Simplified BSD License [see coco/license.txt]
-    def __init__(self, cocoGt=None, cocoDt=None, iouType='segm'):
+    def __init__(self, cocoGt=None, cocoDt=None, iouType='segm', customProps=None):
         '''
         Initialize CocoEval using coco APIs for gt and dt
         :param cocoGt: coco object with ground truth annotations
@@ -72,7 +72,7 @@ class COCOeval:
         self.eval     = {}                  # accumulated evaluation results
         self._gts = defaultdict(list)       # gt for evaluation
         self._dts = defaultdict(list)       # dt for evaluation
-        self.params = Params(iouType=iouType) # parameters
+        self.params = Params(iouType=iouType, customProps=customProps) # parameters
         self._paramsEval = {}               # parameters for evaluation
         self.stats = []                     # result summarization
         self.ious = {}                      # ious between all gts and dts
@@ -438,7 +438,7 @@ class COCOeval:
         '''
         def _summarize( ap=1, iouThr=None, prop='area', propRng='all', maxDets=100 ):
             p = self.params
-            iStr = ' {:<18} {} @[ IoU={:<9} | {:<24}={:>6s} | maxDets={:>3d} ] = {:0.3f}'
+            iStr = ' {:<18} {} @[ IoU={:<9} | {:<24}={:>14s} | maxDets={:>3d} ] = {:0.3f}'
             titleStr = 'Average Precision' if ap == 1 else 'Average Recall'
             typeStr = '(AP)' if ap==1 else '(AR)'
             iouStr = '{:0.2f}:{:0.2f}'.format(p.iouThrs[0], p.iouThrs[-1]) \
@@ -519,7 +519,7 @@ class Params:
     '''
     Params for coco evaluation api
     '''
-    def setDetParams(self):
+    def setDetParams(self, customProps):
         self.imgIds = []
         self.catIds = []
         # np.arange causes trouble.  the data point on arange is slightly larger than the true value
@@ -527,17 +527,9 @@ class Params:
         self.recThrs = np.linspace(.0, 1.00, int(np.round((1.00 - .0) / .01)) + 1, endpoint=True)
         self.maxDets = [1, 10, 100]
         self.props = {
-            "area":                     {"rng": [[0 ** 2, 1e5 ** 2], [0 ** 2, 32 ** 2], [32 ** 2, 96 ** 2], [96 ** 2, 1e5 ** 2]], "lbl": ['all', 'small', 'medium', 'large']},
-            "good_continuation":        {"rng": [[0.0, 1.0], [0.0, 0.892], [0.892, 0.920], [0.920, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
-            "symmetry_1":               {"rng": [[0.0, 1.0], [0.0, 0.763], [0.763, 0.865], [0.865, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
-            "symmetry_2":               {"rng": [[0.0, 1.0], [0.0, 0.800], [0.800, 0.886], [0.886, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
-            "convexity_dist":           {"rng": [[0.0, 1.0], [0.0, 0.739], [0.739, 0.805], [0.805, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
-            "convexity_hull":           {"rng": [[0.0, 1.0], [0.0, 0.886], [0.886, 0.945], [0.945, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
-            "convexity_solidity":       {"rng": [[0.0, 1.0], [0.0, 0.769], [0.769, 0.900], [0.900, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
-            "compactness_centr_dist":   {"rng": [[0.0, 1.0], [0.0, 0.571], [0.571, 0.661], [0.661, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
-            "compactness_circularity":  {"rng": [[0.0, 1.0], [0.0, 0.392], [0.392, 0.598], [0.598, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
-            "compactness_eccentricity": {"rng": [[0.0, 1.0], [0.0, 0.813], [0.813, 0.932], [0.932, 1.0]], "lbl": ['all', 'small', 'medium', 'large']},
+            "area": {"rng": [[0 ** 2, 1e5 ** 2], [0 ** 2, 32 ** 2], [32 ** 2, 96 ** 2], [96 ** 2, 1e5 ** 2]], "lbl": ['all', 'small', 'medium', 'large']},
         }
+        if customProps is not None: self.props |= customProps
         self.useCats = 1
 
     def setKpParams(self):
@@ -552,9 +544,9 @@ class Params:
         self.useCats = 1
         self.kpt_oks_sigmas = np.array([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62,.62, 1.07, 1.07, .87, .87, .89, .89])/10.0
 
-    def __init__(self, iouType='segm'):
+    def __init__(self, iouType='segm', customProps=None):
         if iouType == 'segm' or iouType == 'bbox':
-            self.setDetParams()
+            self.setDetParams(customProps)
         elif iouType == 'keypoints':
             self.setKpParams()
         else:
