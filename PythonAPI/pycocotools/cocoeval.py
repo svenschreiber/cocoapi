@@ -431,7 +431,7 @@ class COCOeval:
         toc = time.time()
         print('DONE (t={:0.2f}s).'.format( toc-tic))
 
-    def summarize(self):
+    def summarize(self, ap=1):
         '''
         Compute and display summary metrics for evaluation results.
         Note this functin can *only* be applied on the default parameter setting
@@ -487,7 +487,7 @@ class COCOeval:
             stats = np.zeros((n_keys * n_rng,))
             for i, prop in enumerate(self.params.props.keys()):
                 for j, propRng in enumerate(self.params.props[prop]["lbl"]):
-                    stats[i * n_rng + j] = _summarize(1, prop=prop, propRng=propRng, maxDets=self.params.maxDets[2])
+                    stats[i * n_rng + j] = _summarize(ap, prop=prop, propRng=propRng, maxDets=self.params.maxDets[2])
                 print()
             return stats
         def _summarizeKps():
